@@ -14,10 +14,23 @@ import {
 import { aiSuggestionJsonSchema, aiSuggestionSchema } from "./ai.schemas";
 
 const AI_PROMPT_VERSION = "object-ai-v1";
+const MIN_OPENAI_TIMEOUT_MS = 60_000;
 
 interface ParsedOpenAiResponseBody {
   body: unknown;
   rawText: string;
+}
+
+function resolveOpenAiTimeoutMs(configuredTimeoutMs: number): number {
+  return Math.max(configuredTimeoutMs, MIN_OPENAI_TIMEOUT_MS);
+}
+
+function logOpenAiEvent(
+  level: "info" | "warn" | "error",
+  payload: Record<string, unknown>,
+  message: string
+): void {
+  console[level](message, payload);
 }
 
 function buildInstructions(): string {
@@ -155,8 +168,21 @@ export class OpenAiObjectGenerationProvider implements ObjectGenerationProvider 
       throw new AiNotConfiguredError();
     }
 
+    const startedAt = Date.now();
+    const timeoutMs = resolveOpenAiTimeoutMs(this.env.OPENAI_TIMEOUT_MS);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.env.OPENAI_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    logOpenAiEvent(
+      "info",
+      {
+        objectId: request.inputSnapshot.objectId,
+        model: this.env.OPENAI_MODEL,
+        imageCount: request.images.length,
+        timeoutMs
+      },
+      "OpenAI request started"
+    );
 
     try {
       const response = await fetch(`${this.env.OPENAI_BASE_URL}/responses`, {
@@ -197,10 +223,23 @@ export class OpenAiObjectGenerationProvider implements ObjectGenerationProvider 
       });
 
       const responseText = await response.text();
+      const durationMs = Date.now() - startedAt;
       const parsedResponse = parseOpenAiResponseBody(responseText);
       const responseBody = parsedResponse.body;
 
       if (!response.ok) {
+        logOpenAiEvent(
+          "warn",
+          {
+            objectId: request.inputSnapshot.objectId,
+            model: this.env.OPENAI_MODEL,
+            statusCode: response.status,
+            durationMs,
+            timeoutMs
+          },
+          "OpenAI request failed"
+        );
+
         const message =
           (responseBody as { error?: { message?: string } }).error?.message ??
           (parsedResponse.rawText ||
@@ -212,6 +251,19 @@ export class OpenAiObjectGenerationProvider implements ObjectGenerationProvider 
       const extracted = extractTextOutput(responseBody);
       const parsed = aiSuggestionSchema.parse(JSON.parse(extracted.text));
 
+      logOpenAiEvent(
+        "info",
+        {
+          objectId: request.inputSnapshot.objectId,
+          model: this.env.OPENAI_MODEL,
+          statusCode: response.status,
+          durationMs,
+          timeoutMs,
+          providerResponseId: extracted.providerResponseId
+        },
+        "OpenAI request completed"
+      );
+
       return {
         suggestion: parsed,
         providerResponseId: extracted.providerResponseId
@@ -222,12 +274,46 @@ export class OpenAiObjectGenerationProvider implements ObjectGenerationProvider 
       }
 
       if (error instanceof Error && error.name === "AbortError") {
+        logOpenAiEvent(
+          "warn",
+          {
+            objectId: request.inputSnapshot.objectId,
+            model: this.env.OPENAI_MODEL,
+            durationMs: Date.now() - startedAt,
+            timeoutMs
+          },
+          "OpenAI request aborted by timeout"
+        );
+
         throw new AiProviderError("Le service IA a depasse le temps maximal autorise");
       }
 
       if (error instanceof SyntaxError) {
+        logOpenAiEvent(
+          "error",
+          {
+            objectId: request.inputSnapshot.objectId,
+            model: this.env.OPENAI_MODEL,
+            durationMs: Date.now() - startedAt,
+            timeoutMs
+          },
+          "OpenAI returned invalid JSON"
+        );
+
         throw new AiInvalidOutputError("La reponse IA n'est pas un JSON valide");
       }
+
+      logOpenAiEvent(
+        "error",
+        {
+          objectId: request.inputSnapshot.objectId,
+          model: this.env.OPENAI_MODEL,
+          durationMs: Date.now() - startedAt,
+          timeoutMs,
+          errorMessage: error instanceof Error ? error.message : "Erreur inconnue"
+        },
+        "OpenAI request failed with unexpected error"
+      );
 
       throw new AiProviderError(
         error instanceof Error ? error.message : "Erreur inconnue du service IA"
