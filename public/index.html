@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Back-office revente</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__mark">LGAA</span>
+          <div>
+            <p class="brand__eyebrow">Back-office prive</p>
+            <h1 class="brand__title">Gestion rapide des objets</h1>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="Navigation principale">
+          <a href="#/pipeline" data-nav="pipeline">Pipeline</a>
+          <a href="#/quick-create" data-nav="quick-create">Creation rapide</a>
+          <a href="#/search" data-nav="search">Recherche</a>
+        </nav>
+
+        <form id="jump-form" class="jump-form">
+          <label class="sr-only" for="jump-object-id">Ouvrir un objet</label>
+          <input
+            id="jump-object-id"
+            name="objectId"
+            type="text"
+            placeholder="LGAA-000001"
+            autocomplete="off"
+          />
+          <button type="submit" class="button button--primary">Ouvrir</button>
+        </form>
+      </header>
+
+      <div id="status-bar" class="status-bar" hidden></div>
+
+      <main id="app" class="app-view" aria-live="polite"></main>
+    </div>
+
+    <script type="module" src="/app/main.js"></script>
+  </body>
+</html>
